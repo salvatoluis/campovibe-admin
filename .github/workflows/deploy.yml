@@ -3,26 +3,50 @@ name: Deploy Admin to DigitalOcean
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: npm }
-      - run: npm ci
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install --legacy-peer-deps
       - run: npm run build
-        env: { VITE_API_URL: https://api.c-vibe.co.ke/v1 }
-      - uses: appleboy/ssh-action@v1.0.3
+        env:
+          VITE_API_URL: https://api.c-vibe.co.ke/v1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Deploy to DigitalOcean
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.DROPLET_HOST }}
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
+          timeout: 300s
           script: |
-            export NVM_DIR="$HOME/.nvm" && [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+            echo "📦 Pulling latest Admin..."
             cd /var/www/campovibe-admin
+            git reset --hard HEAD
             git pull origin main
-            npm ci
+
+            echo "📦 Installing dependencies..."
+            npm install --legacy-peer-deps
+
+            echo "🔨 Building..."
             VITE_API_URL=https://api.c-vibe.co.ke/v1 npm run build
-            echo "✅ Admin deployed"
+
+            echo "✅ Admin deployed!"
